@@ -1,6 +1,6 @@
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
-use std::time::Duration;
+use strategka_render::*;
 use tiny_skia::*;
 
 fn render(width: u32, height: u32, i: f32) -> Pixmap {
@@ -65,48 +65,27 @@ fn render(width: u32, height: u32, i: f32) -> Pixmap {
     pixmap
 }
 
-pub fn main() {
-    let sdl_context = sdl2::init().unwrap();
-    let video_subsystem = sdl_context.video().unwrap();
-
-    let width = 1000;
-    let height = 1000;
-    let window = video_subsystem
-        .window("Triangle", width, height)
-        .position_centered()
-        .build()
-        .unwrap();
-
-    let mut event_pump = sdl_context.event_pump().unwrap();
-    let mut i = 0;
-
-    'running: loop {
-        for event in event_pump.poll_iter() {
-            match event {
-                Event::Quit { .. }
-                | Event::KeyDown {
-                    keycode: Some(Keycode::Escape),
-                    ..
-                } => break 'running,
-                _ => {}
-            }
-        }
-
-        let mut surface = window.surface(&event_pump).expect("Window surface");
-        let pixels = render(width, height, i as f32 / 100.0);
-        
-        surface.with_lock_mut(|window_pixels| {
-            for (i, pixel) in pixels.pixels().iter().enumerate() {
-                let c = pixel.demultiply();
-                window_pixels[i*4] = c.blue();
-                window_pixels[i*4+1] = c.green();
-                window_pixels[i*4+2] = c.red();
-                window_pixels[i*4+3] = c.alpha();
-            }
-        });
-
-        i += 1;
-        surface.finish().expect("blit sufrace to window");
-        ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60)); // sloppy FPS limit
-    }
+pub fn main() -> Result<(), Error> {
+    let render_info = RenderInfo {
+        width: 1000,
+        height: 1000,
+        window_tittle: "Triangle".to_owned(),
+        ..RenderInfo::default()
+    };
+    let mut i = 0.0;
+    render_loop(
+        &render_info,
+        |event| match event {
+            Event::Quit { .. }
+            | Event::KeyDown {
+                keycode: Some(Keycode::Escape),
+                ..
+            } => true,
+            _ => false,
+        },
+        |dt| {
+            i += dt / 1_000_000_000.0; 
+            render(render_info.width, render_info.height, i)
+        },
+    )
 }
