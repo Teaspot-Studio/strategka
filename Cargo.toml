@@ -1,2 +1,2 @@
 [workspace]
-members = ["strategka-render"]
+members = ["strategka-render", "strategka-core"]
