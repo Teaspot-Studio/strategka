@@ -1,7 +1,5 @@
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
-use sdl2::pixels::{Color, PixelFormatEnum};
-use sdl2::render::BlendMode;
 use std::time::Duration;
 use tiny_skia::*;
 
@@ -49,6 +47,7 @@ fn render(width: u32, height: u32, i: f32) -> Pixmap {
     };
 
     let mut pixmap = Pixmap::new(width, height).unwrap();
+    pixmap.fill(Color::from_rgba8(0, 0, 0, 255));
     pixmap.fill_path(
         &path1,
         &paint1,
@@ -78,13 +77,6 @@ pub fn main() {
         .build()
         .unwrap();
 
-    let mut canvas = window.into_canvas().build().unwrap();
-    let creator = canvas.texture_creator();
-    let mut texture = creator
-        .create_texture_streaming(PixelFormatEnum::RGBA8888, width, height)
-        .expect("Texture created");
-    texture.set_blend_mode(BlendMode::Blend);
-
     let mut event_pump = sdl_context.event_pump().unwrap();
     let mut i = 0;
 
@@ -99,27 +91,22 @@ pub fn main() {
                 _ => {}
             }
         }
-        canvas.set_draw_color(Color::RGB(0, 0, 0));
-        canvas.clear();
 
+        let mut surface = window.surface(&event_pump).expect("Window surface");
         let pixels = render(width, height, i as f32 / 100.0);
-        let mut mult_pixels: Vec<u8> =
-            Vec::with_capacity(pixels.width() as usize * pixels.height() as usize);
-        for pixel in pixels.pixels() {
-            let c = pixel.demultiply();
-            mult_pixels.extend_from_slice(&[c.alpha(), c.blue(), c.green(), c.red()]);
-        }
-        i = (i + 1) % 1000;
-        texture
-            .update(
-                None,
-                mult_pixels.as_slice() as &[u8],
-                pixels.width() as usize * 4,
-            )
-            .expect("Texture copied");
-        canvas.copy(&texture, None, None).expect("Texture rendered");
+        
+        surface.with_lock_mut(|window_pixels| {
+            for (i, pixel) in pixels.pixels().iter().enumerate() {
+                let c = pixel.demultiply();
+                window_pixels[i*4] = c.blue();
+                window_pixels[i*4+1] = c.green();
+                window_pixels[i*4+2] = c.red();
+                window_pixels[i*4+3] = c.alpha();
+            }
+        });
 
-        canvas.present();
+        i += 1;
+        surface.finish().expect("blit sufrace to window");
         ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60)); // sloppy FPS limit
     }
 }
