@@ -248,7 +248,7 @@ pub fn main() -> Result<(), Error> {
     let render_info = RenderInfo {
         width: 1000,
         height: 1000,
-        window_tittle: "Triangle".to_owned(),
+        window_tittle: "Circles".to_owned(),
         fps: 120,
         ..RenderInfo::default()
     };
