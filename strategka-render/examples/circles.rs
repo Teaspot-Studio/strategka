@@ -2,14 +2,21 @@ use rand::prelude::*;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::mouse::MouseButton;
-use std::ops::Sub;
+use std::ops::{AddAssign, Div, Mul, Sub};
 use strategka_render::*;
 use tiny_skia::*;
 
 #[derive(Debug, Copy, Clone)]
 struct V2 {
-    x: i32,
-    y: i32,
+    x: f32,
+    y: f32,
+}
+
+impl AddAssign for V2 {
+    fn add_assign(&mut self, rhs: Self) {
+        self.x += rhs.x;
+        self.y += rhs.y;
+    }
 }
 
 impl Sub for V2 {
@@ -23,8 +30,52 @@ impl Sub for V2 {
     }
 }
 
+impl Mul<f32> for V2 {
+    type Output = V2;
+
+    fn mul(self, rhs: f32) -> Self::Output {
+        V2 {
+            x: self.x * rhs,
+            y: self.y * rhs,
+        }
+    }
+}
+
+impl Mul<V2> for f32 {
+    type Output = V2;
+
+    fn mul(self, rhs: V2) -> Self::Output {
+        V2 {
+            x: self * rhs.x,
+            y: self * rhs.y,
+        }
+    }
+}
+
+impl Div<f32> for V2 {
+    type Output = V2;
+
+    fn div(self, rhs: f32) -> Self::Output {
+        V2 {
+            x: self.x / rhs,
+            y: self.y / rhs,
+        }
+    }
+}
+
+impl Div<V2> for f32 {
+    type Output = V2;
+
+    fn div(self, rhs: V2) -> Self::Output {
+        V2 {
+            x: self / rhs.x,
+            y: self / rhs.y,
+        }
+    }
+}
+
 impl V2 {
-    fn square_dist(&self) -> i32 {
+    fn square_dist(&self) -> f32 {
         self.x * self.x + self.y * self.y
     }
 }
@@ -36,7 +87,7 @@ type CircleId = usize;
 struct Circle {
     pos: V2,
     vel: V2,
-    radius: u32,
+    radius: f32,
     selected: bool,
     target: Option<V2>,
 }
@@ -46,17 +97,17 @@ impl Circle {
         Circle {
             pos,
             vel,
-            radius: 15,
+            radius: 15.0,
             selected: false,
             target: None,
         }
     }
 
     pub fn rng(rng: &mut StdRng, width: u32, height: u32) -> Self {
-        let x = rng.gen_range(0..width as i32);
-        let y = rng.gen_range(0..height as i32);
-        let vx = rng.gen_range(0..width as i32);
-        let vy = rng.gen_range(0..height as i32);
+        let x = rng.gen_range(0.0..width as f32);
+        let y = rng.gen_range(0.0..height as f32);
+        let vx = rng.gen_range(0.0..width as f32);
+        let vy = rng.gen_range(0.0..height as f32);
 
         Circle::new(V2 { x, y }, V2 { x: vx, y: vy })
     }
@@ -84,14 +135,22 @@ impl Circle {
     }
 
     pub fn step(&mut self, dt: f32, width: u32, height: u32) {
-        self.pos.x = (self.pos.x as f32 + self.vel.x as f32 * dt) as i32;
-        self.pos.y = (self.pos.y as f32 + self.vel.y as f32 * dt) as i32;
+        self.pos += self.vel * dt;
 
-        if self.pos.x < 0 || self.pos.x > width as i32 {
-            self.vel.x *= -1;
+        if self.pos.x < 0.0 || self.pos.x > width as f32 {
+            self.vel.x *= -1.;
         }
-        if self.pos.y < 0 || self.pos.y > height as i32 {
-            self.vel.y *= -1;
+        if self.pos.y < 0.0 || self.pos.y > height as f32 {
+            self.vel.y *= -1.;
+        }
+
+        if let Some(t) = self.target {
+            let mass = 1.0;
+            let k = 1.0;
+            let c = 0.3;
+            let dv = t - self.pos;
+            let fv = k * dv - c * self.vel;
+            self.vel += fv / mass;
         }
     }
 }
@@ -153,7 +212,11 @@ impl World {
                     }
                     self.selected = Some(*i);
                 }
-                _ => (),
+                Input::Move(p) => {
+                    if let Some(i) = self.selected {
+                        self.circles[i].target = Some(*p);
+                    }
+                }
             }
             self.input = None;
         }
@@ -169,7 +232,7 @@ impl World {
     pub fn circle_at(&self, pos: V2) -> Option<CircleId> {
         self.circles
             .iter()
-            .position(|c| (c.pos - pos).square_dist() < (c.radius * c.radius) as i32)
+            .position(|c| (c.pos - pos).square_dist() < (c.radius * c.radius))
     }
 }
 
@@ -205,9 +268,24 @@ pub fn main() -> Result<(), Error> {
                 y,
                 ..
             } => {
-                if let Some(i) = world.circle_at(V2 { x, y }) {
+                if let Some(i) = world.circle_at(V2 {
+                    x: x as f32,
+                    y: y as f32,
+                }) {
                     world.input = Some(Input::Select(i))
                 }
+                false
+            }
+            Event::MouseButtonDown {
+                mouse_btn: MouseButton::Right,
+                x,
+                y,
+                ..
+            } => {
+                world.input = Some(Input::Move(V2 {
+                    x: x as f32,
+                    y: y as f32,
+                }));
                 false
             }
             _ => false,
