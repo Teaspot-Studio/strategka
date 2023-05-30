@@ -75,7 +75,8 @@ pub fn main() -> Result<(), Error> {
     let mut i = 0.0;
     render_loop(
         &render_info,
-        |event| match event {
+        (),
+        |_, event| match event {
             Event::Quit { .. }
             | Event::KeyDown {
                 keycode: Some(Keycode::Escape),
@@ -83,8 +84,8 @@ pub fn main() -> Result<(), Error> {
             } => true,
             _ => false,
         },
-        |dt| {
-            i += dt / 1_000_000_000.0; 
+        |_, dt| {
+            i += dt / 1_000_000_000.0;
             render(render_info.width, render_info.height, i)
         },
     )

@@ -48,14 +48,15 @@ pub enum Error {
 ///
 /// - `event_handler` process events, if returns 'true' the render loop exits
 /// - `render` creates next frame based on nanoseconds passed between frames.
-pub fn render_loop<E, R>(
+pub fn render_loop<E, R, S>(
     info: &RenderInfo,
+    mut state: S,
     mut event_handler: E,
     mut render: R,
 ) -> Result<(), Error>
 where
-    E: FnMut(Event) -> bool,
-    R: FnMut(f32) -> Pixmap,
+    E: FnMut(&mut S, Event) -> bool,
+    R: FnMut(&mut S, f32) -> Pixmap,
 {
     let sdl_context = sdl2::init().map_err(Error::SdlInit)?;
     let video_subsystem = sdl_context.video().map_err(Error::VideoInit)?;
@@ -69,14 +70,14 @@ where
     let mut event_pump = sdl_context.event_pump().map_err(Error::EventPump)?;
     'running: loop {
         for event in event_pump.poll_iter() {
-            if event_handler(event) {
+            if event_handler(&mut state, event) {
                 break 'running;
             }
         }
 
         let mut surface = window.surface(&event_pump).map_err(Error::WindowSurface)?;
         let dt = ensure_fps(info.fps, &last_tick);
-        let pixels = render(dt);
+        let pixels = render(&mut state, dt);
 
         surface.with_lock_mut(|window_pixels| {
             for (i, pixel) in pixels.pixels().iter().enumerate() {

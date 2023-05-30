@@ -1,6 +1,8 @@
 use rand::prelude::*;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
+use sdl2::mouse::MouseButton;
+use std::ops::Sub;
 use strategka_render::*;
 use tiny_skia::*;
 
@@ -9,6 +11,26 @@ struct V2 {
     x: i32,
     y: i32,
 }
+
+impl Sub for V2 {
+    type Output = V2;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        V2 {
+            x: self.x - rhs.x,
+            y: self.y - rhs.y,
+        }
+    }
+}
+
+impl V2 {
+    fn square_dist(&self) -> i32 {
+        self.x * self.x + self.y * self.y
+    }
+}
+
+/// Index of circle
+type CircleId = usize;
 
 #[derive(Debug, Clone)]
 struct Circle {
@@ -86,13 +108,15 @@ struct World {
     width: u32,
     height: u32,
     circles: Vec<Circle>,
+    input: Option<Input>,
+    selected: Option<CircleId>,
 }
 
 impl World {
     pub fn new(width: u32, height: u32, circles_num: usize, seed: u64) -> Self {
         let mut rng = {
             let mut streched_seed = [0u8; 32];
-            streched_seed[0 .. 8].copy_from_slice(&seed.to_ne_bytes());
+            streched_seed[0..8].copy_from_slice(&seed.to_ne_bytes());
             StdRng::from_seed(streched_seed)
         };
 
@@ -105,6 +129,8 @@ impl World {
             width,
             height,
             circles,
+            input: None,
+            selected: None,
         }
     }
 
@@ -117,11 +143,42 @@ impl World {
         pixmap
     }
 
+    pub fn process_input(&mut self) {
+        if let Some(input) = &self.input {
+            match input {
+                Input::Select(i) => {
+                    self.circles[*i].selected = true;
+                    if let Some(other) = self.selected {
+                        self.circles[other].selected = false;
+                    }
+                    self.selected = Some(*i);
+                }
+                _ => (),
+            }
+            self.input = None;
+        }
+    }
+
     pub fn step(&mut self, dt: f32) {
         for circle in self.circles.iter_mut() {
             circle.step(dt, self.width, self.height);
         }
     }
+
+    /// Return first circle under the point
+    pub fn circle_at(&self, pos: V2) -> Option<CircleId> {
+        self.circles
+            .iter()
+            .position(|c| (c.pos - pos).square_dist() < (c.radius * c.radius) as i32)
+    }
+}
+
+#[derive(Debug, Clone)]
+enum Input {
+    /// Player selects circle with index i
+    Select(CircleId),
+    /// Player orders to move to the point
+    Move(V2),
 }
 
 pub fn main() -> Result<(), Error> {
@@ -132,18 +189,31 @@ pub fn main() -> Result<(), Error> {
         fps: 120,
         ..RenderInfo::default()
     };
-    let mut world = World::new(render_info.width, render_info.height, 20, 42);
+    let world = World::new(render_info.width, render_info.height, 20, 42);
     render_loop(
         &render_info,
-        |event| match event {
+        world,
+        |world, event| match event {
             Event::Quit { .. }
             | Event::KeyDown {
                 keycode: Some(Keycode::Escape),
                 ..
             } => true,
+            Event::MouseButtonDown {
+                mouse_btn: MouseButton::Left,
+                x,
+                y,
+                ..
+            } => {
+                if let Some(i) = world.circle_at(V2 { x, y }) {
+                    world.input = Some(Input::Select(i))
+                }
+                false
+            }
             _ => false,
         },
-        |dt| {
+        |world, dt| {
+            world.process_input();
             world.step(dt / 1_000_000_000.0);
             world.render()
         },
