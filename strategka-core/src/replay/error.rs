@@ -17,6 +17,8 @@ pub enum Error<'a> {
     UnsupportedCoreVersion(u32),
     #[error("Unsupported game version of replay format: {0}")]
     UnsupportedGameVersion(u32),
+    #[error("There is input with length 0 in replay turn")]
+    MissingTurnInput,
     #[error("Parsing error {1:?} for input: {0:?}")]
     Parsing(&'a [u8], ErrorKind),
     #[error("Length prefixed block has invalid length. Found {0}, the input has only {1} bytes")]

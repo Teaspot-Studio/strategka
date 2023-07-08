@@ -2,7 +2,12 @@ mod encoder;
 pub mod error;
 
 use log::warn;
-use nom::{bytes::complete::take, error::context, number::complete::be_u32, Err, IResult};
+use nom::{
+    bytes::complete::take,
+    error::context,
+    number::complete::{be_u32, be_u64},
+    Err, IResult,
+};
 use serde::{de::DeserializeOwned, Serialize};
 use std::io::Write;
 
@@ -72,8 +77,12 @@ impl<W: World + Default + Clone + Serialize + DeserializeOwned> Replay<W> {
         sink.write_all(&W::magic_bytes())?;
         encode_be_u32(W::current_version(), &mut sink)?;
         encode_be_u32(self.rate, &mut sink)?;
-        length_encoded(&mut sink, |sink| {
-            ciborium_into_writer(&self.initial, sink)
+        length_encoded(&mut sink, |sink| ciborium_into_writer(&self.initial, sink))?;
+        encode_vec(&self.inputs, &mut sink, |mut sink, (step, inputs)| {
+            encode_be_u64(*step, &mut sink)?;
+            encode_vec(inputs, &mut sink, |sink, input| {
+                length_encoded(sink, |sink| ciborium_into_writer(input, sink))
+            })
         })?;
         Ok(())
     }
@@ -94,12 +103,13 @@ impl<W: World + Default + Clone + Serialize + DeserializeOwned> Replay<W> {
         let (input, _) = context("game version", parse_game_version::<W>)(input)?;
         let (input, rate) = context("simulation rate", be_u32)(input)?;
         let (input, initial) = context("initial world", length_decoding(ciborium_parse))(input)?;
+        let (input, inputs) = context("inputs", decode_vec(parse_turn::<W>))(input)?;
         Ok((
             input,
             Replay {
                 rate,
-                initial,
-                inputs: vec![],
+                initial: initial.unwrap_or_default(),
+                inputs,
             },
         ))
     }
@@ -147,24 +157,56 @@ fn parse_game_version<W: World>(input: &[u8]) -> Parser<u32> {
     }
 }
 
-fn length_decoding<'a, R: Default, F>(f: F) -> impl FnMut(&'a [u8]) -> Parser<'a, R>
+fn parse_turn<W: World>(input: &[u8]) -> Parser<(u64, Vec<W::Input>)> {
+    let (input, turn) = context("turn number", be_u64)(input)?;
+    let (input, inputs) = context("turn inputs", decode_vec(parse_input::<W>))(input)?;
+    Ok((input, (turn, inputs)))
+}
+
+fn parse_input<W: World>(input: &[u8]) -> Parser<W::Input> {
+    let (input, input_opt) = context("turn input", length_decoding(ciborium_parse))(input)?;
+    if let Some(turn_input) = input_opt {
+        Ok((input, turn_input))
+    } else {
+        Err(nom::Err::Failure(Error::MissingTurnInput))
+    }
+}
+
+fn length_decoding<'a, R, F>(f: F) -> impl FnMut(&'a [u8]) -> Parser<'a, Option<R>>
 where
     F: FnMut(&'a [u8]) -> Parser<'a, R> + Copy,
 {
     move |input| {
-        let (input, len) = context("block length", be_u32)(input)?;
+        let (input, len) = context("block length", be_u64)(input)?;
         if input.len() < len as usize {
             return Err(Err::Error(Error::InvalidLength(len as usize, input.len())));
         }
         let restricted_input = &input[0..len as usize];
         let result = if len == 0 {
             warn!("Block length is 0");
-            Default::default()
+            None
         } else {
             let (_, result) = context("block body", f)(restricted_input)?;
-            result
+            Some(result)
         };
         Ok((&input[len as usize..], result))
+    }
+}
+
+fn decode_vec<'a, R, F>(item_parser: F) -> impl FnMut(&'a [u8]) -> Parser<'a, Vec<R>>
+where
+    F: FnMut(&'a [u8]) -> Parser<'a, R> + Copy,
+{
+    move |input| {
+        let (input, len) = context("vector length", be_u64)(input)?;
+        let mut result = Vec::with_capacity(len as usize);
+        let mut cycle_input = input;
+        for _ in 0..len {
+            let (input, item) = context("vector item", item_parser)(cycle_input)?;
+            cycle_input = input;
+            result.push(item);
+        }
+        Ok((cycle_input, result))
     }
 }
 
@@ -199,9 +241,14 @@ mod tests {
     }
 
     #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-    struct TestWorld2 { field1: u32 }
+    struct TestWorld2 {
+        field1: u32,
+    }
     #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-    enum TestInput2 {}
+    enum TestInput2 {
+        Add(u32),
+        Sub(u32),
+    }
 
     impl World for TestWorld2 {
         type Input = TestInput2;
@@ -224,6 +271,32 @@ mod tests {
 
         let replay2 = Replay::<TestWorld2>::new(&TestWorld2 { field1: 42 }, 60);
         make_encode_decode_test(replay2);
+
+        let mut replay3 = Replay::<TestWorld2>::new(&TestWorld2 { field1: 42 }, 60);
+        replay3.record(0, &vec![]).expect("record");
+        make_encode_decode_test(replay3);
+
+        let mut replay4 = Replay::<TestWorld2>::new(&TestWorld2 { field1: 42 }, 60);
+        replay4
+            .record(1, &vec![TestInput2::Add(4)])
+            .expect("record");
+        make_encode_decode_test(replay4);
+
+        let mut replay5 = Replay::<TestWorld2>::new(&TestWorld2 { field1: 42 }, 60);
+        replay5
+            .record(1, &vec![TestInput2::Add(4), TestInput2::Sub(2)])
+            .expect("record");
+        make_encode_decode_test(replay5);
+
+        let mut replay6 = Replay::<TestWorld2>::new(&TestWorld2 { field1: 42 }, 60);
+        replay6.record(0, &vec![]).expect("record");
+        replay6
+            .record(1, &vec![TestInput2::Add(4)])
+            .expect("record");
+        replay6
+            .record(2, &vec![TestInput2::Sub(2), TestInput2::Add(8)])
+            .expect("record");
+        make_encode_decode_test(replay6);
     }
 
     fn make_encode_decode_test<
