@@ -1,12 +1,12 @@
 mod encoder;
+mod decoder;
 pub mod error;
 
-use log::warn;
 use nom::{
     bytes::complete::take,
     error::context,
     number::complete::{be_u32, be_u64},
-    Err, IResult,
+    Err,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use std::io::Write;
@@ -15,6 +15,7 @@ use crate::World;
 use error::{Error, Result};
 
 use self::encoder::*;
+use self::decoder::*;
 
 /// Each tick simulation has a number from the begining
 pub type Turn = u64;
@@ -115,8 +116,6 @@ impl<W: World + Default + Clone + Serialize + DeserializeOwned> Replay<W> {
     }
 }
 
-type Parser<'a, T> = IResult<&'a [u8], T, Error<'a>>;
-
 fn parse_magic(input: &[u8]) -> Parser<()> {
     let (input, magic) = take(4_u32)(input)?;
     if magic != MAGIC_BYTES {
@@ -170,51 +169,6 @@ fn parse_input<W: World>(input: &[u8]) -> Parser<W::Input> {
     } else {
         Err(nom::Err::Failure(Error::MissingTurnInput))
     }
-}
-
-fn length_decoding<'a, R, F>(f: F) -> impl FnMut(&'a [u8]) -> Parser<'a, Option<R>>
-where
-    F: FnMut(&'a [u8]) -> Parser<'a, R> + Copy,
-{
-    move |input| {
-        let (input, len) = context("block length", be_u64)(input)?;
-        if input.len() < len as usize {
-            return Err(Err::Error(Error::InvalidLength(len as usize, input.len())));
-        }
-        let restricted_input = &input[0..len as usize];
-        let result = if len == 0 {
-            warn!("Block length is 0");
-            None
-        } else {
-            let (_, result) = context("block body", f)(restricted_input)?;
-            Some(result)
-        };
-        Ok((&input[len as usize..], result))
-    }
-}
-
-fn decode_vec<'a, R, F>(item_parser: F) -> impl FnMut(&'a [u8]) -> Parser<'a, Vec<R>>
-where
-    F: FnMut(&'a [u8]) -> Parser<'a, R> + Copy,
-{
-    move |input| {
-        let (input, len) = context("vector length", be_u64)(input)?;
-        let mut result = Vec::with_capacity(len as usize);
-        let mut cycle_input = input;
-        for _ in 0..len {
-            let (input, item) = context("vector item", item_parser)(cycle_input)?;
-            cycle_input = input;
-            result.push(item);
-        }
-        Ok((cycle_input, result))
-    }
-}
-
-fn ciborium_parse<'a, T: DeserializeOwned>(input: &'a [u8]) -> Parser<'a, T> {
-    let res = ciborium::de::from_reader(input)
-        .map_err(Error::Decoder)
-        .map_err(Err::Failure)?;
-    Ok((&input[input.len()..], res))
 }
 
 #[cfg(test)]
