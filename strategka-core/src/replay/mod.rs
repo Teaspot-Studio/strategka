@@ -1,21 +1,22 @@
-mod encoder;
 mod decoder;
+mod encoder;
 pub mod error;
 
 use nom::{
-    bytes::complete::take,
+    bytes::streaming::take,
     error::context,
-    number::complete::{be_u32, be_u64},
-    Err,
+    number::streaming::{be_u32, be_u64},
+    Err, Needed,
 };
 use serde::{de::DeserializeOwned, Serialize};
-use std::io::Write;
+use std::io::Read;
+use std::{fs::File, io::Write, path::Path};
 
 use crate::World;
-use error::{Error, Result};
+use error::{Error, GenericError, Result, ResultOwned};
 
-use self::encoder::*;
 use self::decoder::*;
+use self::encoder::*;
 
 /// Each tick simulation has a number from the begining
 pub type Turn = u64;
@@ -69,6 +70,44 @@ impl<W: World + Default + Clone + Serialize + DeserializeOwned> Replay<W> {
         }
         self.inputs.push((turn, inputs.to_vec()));
         Ok(())
+    }
+
+    /// Write down bytes of replay into the file located at given [path]
+    pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+        let f = File::create(path)?;
+        self.encode(f)?;
+        Ok(())
+    }
+
+    /// Load replay from file
+    pub fn load<P: AsRef<Path> + Clone>(path: P) -> ResultOwned<Self> {
+        let mut f = File::open(path.clone())?;
+        let mut last_needed: Option<Needed> = None;
+        let mut buff: Vec<u8> = Vec::new();
+        loop {
+            const CHUNK_SIZE: usize = 8 * 1014 * 1024; // 8 MB
+            let mut chunk: Vec<u8> = vec![0; CHUNK_SIZE];
+
+            let n = f.read(&mut chunk)?;
+            if n == 0 {
+                if let Some(needed) = last_needed {
+                    log::error!(
+                        "Cannot parse replay from {:?}, missing {needed:?}",
+                        path.as_ref().to_str()
+                    );
+                    return Err(GenericError::Incomplete(needed));
+                }
+            }
+            buff.extend_from_slice(&chunk[0..n]); // TODO: implement truly incremental parser for large replays
+            match Self::parser(&buff) {
+                Ok((_, value)) => return Ok(value),
+                Err(Err::Incomplete(needed)) => {
+                    last_needed = Some(needed);
+                }
+                Err(Err::Error(e)) => return Err(e.into_owned()),
+                Err(Err::Failure(e)) => return Err(e.into_owned()),
+            }
+        }
     }
 
     /// Write down serialized bytes of replay into the buffer
@@ -253,6 +292,21 @@ mod tests {
         make_encode_decode_test(replay6);
     }
 
+    #[test]
+    fn save_load_test() {
+        env_logger::init();
+
+        let mut replay1 = Replay::<TestWorld2>::new(&TestWorld2 { field1: 42 }, 60);
+        replay1.record(0, &vec![]).expect("record");
+        replay1
+            .record(1, &vec![TestInput2::Add(4)])
+            .expect("record");
+        replay1
+            .record(2, &vec![TestInput2::Sub(2), TestInput2::Add(8)])
+            .expect("record");
+        make_save_load_test(replay1);
+    }
+
     fn make_encode_decode_test<
         W: World + Clone + PartialEq + Default + Debug + Serialize + DeserializeOwned,
     >(
@@ -262,5 +316,16 @@ mod tests {
         replay.encode(&mut buffer).expect("encoded");
         let replay_decoded = Replay::<W>::decode(&buffer).expect("decoded");
         assert_eq!(replay, replay_decoded);
+    }
+
+    fn make_save_load_test<
+        W: World + Clone + PartialEq + Default + Debug + Serialize + DeserializeOwned,
+    >(
+        replay: Replay<W>,
+    ) {
+        let t = temp_file::TempFile::new().expect("temp file");
+        replay.save(t.path()).expect("save replay");
+        let replay_loaded = Replay::<W>::load(t.path()).expect("load replay");
+        assert_eq!(replay, replay_loaded);
     }
 }

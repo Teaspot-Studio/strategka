@@ -1,5 +1,7 @@
+use std::num::NonZeroUsize;
+
 use log::warn;
-use nom::{error::context, number::complete::be_u64, Err, IResult};
+use nom::{error::context, number::streaming::be_u64, Err, IResult};
 use serde::de::DeserializeOwned;
 
 use super::error::Error;
@@ -13,7 +15,11 @@ where
     move |input| {
         let (input, len) = context("block length", be_u64)(input)?;
         if input.len() < len as usize {
-            return Err(Err::Error(Error::InvalidLength(len as usize, input.len())));
+            if let Some(nz_len) = NonZeroUsize::new(len as usize) {
+                return Err(Err::Incomplete(nom::Needed::Size(nz_len)));
+            } else {
+                return Err(Err::Error(Error::InvalidLength(len as usize, input.len())));
+            }
         }
         let restricted_input = &input[0..len as usize];
         let result = if len == 0 {
@@ -44,7 +50,7 @@ where
     }
 }
 
-pub fn ciborium_parse<'a, T: DeserializeOwned>(input: &'a [u8]) -> Parser<'a, T> {
+pub fn ciborium_parse<T: DeserializeOwned>(input: &[u8]) -> Parser<'_, T> {
     let res = ciborium::de::from_reader(input)
         .map_err(Error::Decoder)
         .map_err(Err::Failure)?;
