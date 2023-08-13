@@ -99,9 +99,10 @@ where
 fn ensure_fps(fps: u32, last_tick: &time::Instant) -> f32 {
     let t = last_tick.elapsed();
     let passed_nano = t.as_secs() * 1_000_000_000 + t.subsec_nanos() as u64;
-    let diff = (1. / fps as f32) * 1_000_000_000. - (passed_nano as f32);
+    let fps_dt = (1. / fps as f32) * 1_000_000_000.;
+    let diff = fps_dt - (passed_nano as f32);
     if diff > 0.0 {
         thread::sleep(time::Duration::new(0, diff as u32))
     };
-    diff
+    fps_dt
 }
