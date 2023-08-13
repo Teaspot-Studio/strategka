@@ -32,10 +32,9 @@ where
     Ok(())
 }
 
-
 /// Guard that allow to write 0 bytes with ciborium to buffers but warns about that.
 pub fn ciborium_into_writer<'a, T: ?Sized + serde::Serialize, W: Write>(
-    value: &T, 
+    value: &T,
     writer: W,
 ) -> Result<'a, ()> {
     match ciborium::into_writer(value, writer) {
@@ -54,9 +53,9 @@ pub fn ciborium_into_writer<'a, T: ?Sized + serde::Serialize, W: Write>(
 pub fn encode_vec<'a, T, W: Write, F>(
     values: &[T],
     mut sink: W,
-    mut item_encoder: F 
-) -> Result<'a, ()> 
-    where 
+    mut item_encoder: F,
+) -> Result<'a, ()>
+where
     F: FnMut(&mut W, &T) -> Result<'a, ()>,
 {
     encode_be_u64(values.len() as u64, &mut sink)?;

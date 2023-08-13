@@ -49,8 +49,7 @@ pub type Result<'a, T> = std::result::Result<T, Error<'a>>;
 /// Shortcut for results with replay errors
 pub type ResultOwned<T> = std::result::Result<T, ErrorOwned>;
 
-impl<'a> GenericError<&'a [u8]>
-{
+impl<'a> GenericError<&'a [u8]> {
     pub fn into_owned(self) -> GenericError<Vec<u8>> {
         match self {
             GenericError::IncoherentTurn(t1, t2) => GenericError::IncoherentTurn(t1, t2),
@@ -63,7 +62,9 @@ impl<'a> GenericError<&'a [u8]>
             GenericError::InvalidLength(l1, l2) => GenericError::InvalidLength(l1, l2),
             GenericError::Encoder(e) => GenericError::Encoder(e),
             GenericError::Decoder(e) => GenericError::Decoder(e),
-            GenericError::Context(v, other) => GenericError::Context(v, Box::new(other.into_owned())),
+            GenericError::Context(v, other) => {
+                GenericError::Context(v, Box::new(other.into_owned()))
+            }
             GenericError::Incomplete(needed) => GenericError::Incomplete(needed),
         }
     }

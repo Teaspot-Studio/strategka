@@ -1,5 +1,9 @@
+use std::convert::Infallible;
+
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
+use serde::{Deserialize, Serialize};
+use strategka_core::World;
 use strategka_render::*;
 use tiny_skia::*;
 
@@ -65,28 +69,59 @@ fn render(width: u32, height: u32, i: f32) -> Pixmap {
     pixmap
 }
 
-pub fn main() -> Result<(), Error> {
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+enum TriangleInput {
+    EndSimulation,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct TriangleWorld {
+    i: f32,
+}
+
+impl Default for TriangleWorld {
+    fn default() -> Self {
+        TriangleWorld { i: 0.0 }
+    }
+}
+
+impl World for TriangleWorld {
+    type Input = TriangleInput;
+
+    fn magic_bytes() -> [u8; 4] {
+        b"trgl".clone()
+    }
+
+    fn current_version() -> u32 {
+        1
+    }
+}
+
+pub fn main() -> Result<(), Error<Infallible>> {
     let render_info = RenderInfo {
         width: 1000,
         height: 1000,
         window_tittle: "Triangle".to_owned(),
         ..RenderInfo::default()
     };
-    let mut i = 0.0;
     render_loop(
         &render_info,
-        (),
+        TriangleWorld::default(),
         |_, event| match event {
             Event::Quit { .. }
             | Event::KeyDown {
                 keycode: Some(Keycode::Escape),
                 ..
-            } => true,
-            _ => false,
+            } => Ok(vec![TriangleInput::EndSimulation]),
+            _ => Ok(vec![]),
         },
-        |_, dt| {
-            i += dt / 1_000_000_000.0;
-            render(render_info.width, render_info.height, i)
+        |_, input| match input {
+            TriangleInput::EndSimulation => Ok(true),
         },
+        |w, dt| {
+            w.i += dt / 1_000_000_000.0;
+            Ok(())
+        },
+        |w| Ok(render(render_info.width, render_info.height, w.i)),
     )
 }
