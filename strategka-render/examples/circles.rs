@@ -1,10 +1,14 @@
+use clap::{Parser, Subcommand};
 use rand::prelude::*;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::mouse::MouseButton;
 use serde::{Deserialize, Serialize};
-use std::ops::{AddAssign, Div, Mul, Sub};
-use strategka_core::World;
+use std::{
+    ops::{AddAssign, Div, Mul, Sub},
+    path::PathBuf,
+};
+use strategka_core::{Replay, World};
 use strategka_render::*;
 use thiserror::Error;
 use tiny_skia::*;
@@ -277,59 +281,120 @@ impl World for CirclesWorld {
     }
 }
 
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+#[command(propagate_version = true)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Play the game and save replay
+    Play {
+        /// Where to save replay
+        #[arg(short, long)]
+        replay: Option<PathBuf>,
+    },
+    /// Load replay and show it contents
+    Replay {
+        /// Where replay to load is located
+        #[arg(short, long)]
+        replay: PathBuf,
+    },
+}
+
 pub fn main() -> Result<(), Error<CircleError>> {
-    let render_info = RenderInfo {
+    let args = Cli::parse();
+
+    let mut render_info = RenderInfo {
         width: 1000,
         height: 1000,
         window_tittle: "Circles".to_owned(),
         fps: 120,
-        save_replay: Some("circles.replay".into()),
+        // save_replay: Some("circles.replay".into()),
         ..RenderInfo::default()
     };
-    let world = CirclesWorld::new(render_info.width, render_info.height, 20, 42);
-    render_loop(
-        &render_info,
-        world,
-        |world, event| match event {
-            Event::Quit { .. }
-            | Event::KeyDown {
-                keycode: Some(Keycode::Escape),
-                ..
-            } => Ok(vec![CirclesInput::EndSimulation]),
-            Event::MouseButtonDown {
-                mouse_btn: MouseButton::Left,
-                x,
-                y,
-                ..
-            } => {
-                if let Some(i) = world.circle_at(V2 {
-                    x: x as f32,
-                    y: y as f32,
-                }) {
-                    Ok(vec![CirclesInput::Select(i)])
-                } else {
-                    Ok(vec![])
-                }
-            }
-            Event::MouseButtonDown {
-                mouse_btn: MouseButton::Right,
-                x,
-                y,
-                ..
-            } => Ok(vec![CirclesInput::Move(V2 {
-                x: x as f32,
-                y: y as f32,
-            })]),
-            _ => Ok(vec![]),
-        },
-        |world, input| {
-            world.process_input(input);
-            Ok(matches!(input, CirclesInput::EndSimulation))
-        },
-        |world, dt| {
-            world.step(dt / 1_000_000_000.0);
-            Ok(())
-        },
-        |world| world.render(),
-    )
+    let input_handler = |world: &mut CirclesWorld, input: &CirclesInput| {
+        world.process_input(input);
+        Ok(matches!(input, CirclesInput::EndSimulation))
+    };
+    let simulate = |world: &mut CirclesWorld, dt| {
+        world.step(dt / 1_000_000_000.0);
+        Ok(())
+    };
+    let render_handler = |world: &CirclesWorld| world.render();
+    match args.command {
+        Commands::Play { replay } => {
+            render_info.save_replay = replay;
+            let world = CirclesWorld::new(render_info.width, render_info.height, 20, 42);
+            render_loop(
+                &render_info,
+                world,
+                |world, event| match event {
+                    Event::Quit { .. }
+                    | Event::KeyDown {
+                        keycode: Some(Keycode::Escape),
+                        ..
+                    } => Ok(vec![CirclesInput::EndSimulation]),
+                    Event::MouseButtonDown {
+                        mouse_btn: MouseButton::Left,
+                        x,
+                        y,
+                        ..
+                    } => {
+                        if let Some(i) = world.circle_at(V2 {
+                            x: x as f32,
+                            y: y as f32,
+                        }) {
+                            Ok(vec![CirclesInput::Select(i)])
+                        } else {
+                            Ok(vec![])
+                        }
+                    }
+                    Event::MouseButtonDown {
+                        mouse_btn: MouseButton::Right,
+                        x,
+                        y,
+                        ..
+                    } => Ok(vec![CirclesInput::Move(V2 {
+                        x: x as f32,
+                        y: y as f32,
+                    })]),
+                    _ => Ok(vec![]),
+                },
+                input_handler,
+                simulate,
+                render_handler,
+            )
+        }
+        Commands::Replay { replay } => {
+            let loaded_replay = Replay::<CirclesWorld>::load(replay)?;
+
+            replay_loop(
+                &render_info,
+                &loaded_replay,
+                |_, event| match event {
+                    Event::Quit { .. }
+                    | Event::KeyDown {
+                        keycode: Some(Keycode::Escape),
+                        ..
+                    } => Ok(Some(ReplayControl::EndReplay)),
+                    Event::KeyDown {
+                        keycode: Some(Keycode::Space),
+                        ..
+                    } => Ok(Some(ReplayControl::ToggleSimulation)),
+                    Event::KeyDown {
+                        keycode: Some(Keycode::R),
+                        ..
+                    } => Ok(Some(ReplayControl::RestartSimulation)),
+                    _ => Ok(None),
+                },
+                input_handler,
+                simulate,
+                render_handler,
+            )
+        }
+    }
 }

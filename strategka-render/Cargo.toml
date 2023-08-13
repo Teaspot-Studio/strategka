@@ -13,4 +13,5 @@ strategka-core = { path = "../strategka-core", version = "0.1.0" }
 serde = {version = "*", features = [ "derive" ] }
 
 [dev-dependencies]
+clap = { version = "4.3.21", features = ["derive"] }
 rand = "0.8.5"

@@ -32,6 +32,8 @@ pub struct Replay<W: World> {
     pub rate: u32,
     /// Initial state of simulation to start with
     pub initial: W,
+    /// Amount of turns until the simulation should run
+    pub total_turns: u64,
     /// All recorded inputs from players or external events
     pub inputs: Vec<(Turn, Vec<W::Input>)>,
 }
@@ -41,6 +43,7 @@ impl<W: World + Default> Default for Replay<W> {
         Replay {
             rate: 60,
             initial: Default::default(),
+            total_turns: 0,
             inputs: vec![],
         }
     }
@@ -57,6 +60,7 @@ impl<W: World + Default + Clone + Serialize + DeserializeOwned> Replay<W> {
         Replay {
             initial: world.clone(),
             rate,
+            total_turns: 0,
             inputs: vec![],
         }
     }
@@ -69,6 +73,7 @@ impl<W: World + Default + Clone + Serialize + DeserializeOwned> Replay<W> {
             }
         }
         self.inputs.push((turn, inputs.to_vec()));
+        self.total_turns = turn;
         Ok(())
     }
 
@@ -118,6 +123,7 @@ impl<W: World + Default + Clone + Serialize + DeserializeOwned> Replay<W> {
         encode_be_u32(W::current_version(), &mut sink)?;
         encode_be_u32(self.rate, &mut sink)?;
         length_encoded(&mut sink, |sink| ciborium_into_writer(&self.initial, sink))?;
+        encode_be_u64(self.total_turns, &mut sink)?;
         encode_vec(&self.inputs, &mut sink, |mut sink, (step, inputs)| {
             encode_be_u64(*step, &mut sink)?;
             encode_vec(inputs, &mut sink, |sink, input| {
@@ -143,12 +149,14 @@ impl<W: World + Default + Clone + Serialize + DeserializeOwned> Replay<W> {
         let (input, _) = context("game version", parse_game_version::<W>)(input)?;
         let (input, rate) = context("simulation rate", be_u32)(input)?;
         let (input, initial) = context("initial world", length_decoding(ciborium_parse))(input)?;
+        let (input, total_turns) = context("total_turns", be_u64)(input)?;
         let (input, inputs) = context("inputs", decode_vec(parse_turn::<W>))(input)?;
         Ok((
             input,
             Replay {
                 rate,
                 initial: initial.unwrap_or_default(),
+                total_turns,
                 inputs,
             },
         ))
