@@ -215,6 +215,7 @@ mod tests {
     use super::*;
     use serde::{Deserialize, Serialize};
     use std::fmt::Debug;
+    use test_log::test;
 
     #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
     struct TestWorld1 {}
@@ -257,8 +258,6 @@ mod tests {
 
     #[test]
     fn encode_decode_id() {
-        env_logger::init();
-
         let replay1 = Replay::<TestWorld1>::new(&TestWorld1 {}, 60);
         make_encode_decode_test(replay1);
 
@@ -294,8 +293,6 @@ mod tests {
 
     #[test]
     fn save_load_test() {
-        env_logger::init();
-
         let mut replay1 = Replay::<TestWorld2>::new(&TestWorld2 { field1: 42 }, 60);
         replay1.record(0, &vec![]).expect("record");
         replay1

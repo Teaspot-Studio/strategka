@@ -16,3 +16,4 @@ log = "0.4.18"
 serde = {version = "*", features = [ "derive" ] }
 env_logger = "*"
 temp-file = "0.1.7"
+test-log = "0.2.12"
